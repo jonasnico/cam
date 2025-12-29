@@ -2,11 +2,14 @@ import GUI from 'lil-gui';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { detectFaces, initFaceDetector } from './detection/faceDetector.js';
+import { detectFaceLandmarks, initFaceLandmarker } from './detection/faceLandmarker.js';
+import { detectHandLandmarks, initHandLandmarker } from './detection/handLandmarker.js';
 import { animateCube, createCube } from './modes/cube.js';
-import { createFaceTrack, updateFaceMarkers } from './modes/faceTrack.js';
 import { createGrid } from './modes/grid.js';
 import { createSphere } from './modes/sphere.js';
+import { createTracking } from './modes/tracking.js';
 import { createTunnel } from './modes/tunnel.js';
+import { clearAllOverlays, initOverlay, updateFaceDetectionOverlay, updateLandmarksOverlay } from './tracking/overlay.js';
 
 const video = document.getElementById('video');
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -27,15 +30,24 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enablePan = false;
 
 const modes = {
+  tracking: () => createTracking(meshGroup, material, camera, controls),
   sphere: () => createSphere(meshGroup, material, camera, controls),
   tunnel: () => createTunnel(meshGroup, material, camera, controls),
   grid: () => createGrid(meshGroup, material, camera, controls),
   cube: () => createCube(meshGroup, material, camera, controls),
-  faceTrack: () => createFaceTrack(meshGroup, material, camera, controls)
 };
 
-const settings = { mode: 'sphere', faceDetection: false };
+const settings = { 
+  mode: 'tracking', 
+  faceDetection: false,
+  faceLandmarks: false,
+  handLandmarks: false
+};
 let lastDetections = [];
+let lastFaceLandmarks = null;
+let lastHandLandmarks = null;
+
+initOverlay(scene);
 
 function clearScene() {
   while (meshGroup.children.length > 0) {
@@ -54,8 +66,16 @@ function setMode(mode) {
 
 const gui = new GUI();
 gui.add(settings, 'mode', Object.keys(modes)).name('Visualization').onChange(setMode);
-gui.add(settings, 'faceDetection').name('Face Detection').onChange(async (enabled) => {
+
+const detectionFolder = gui.addFolder('Detection');
+detectionFolder.add(settings, 'faceDetection').name('Face Detection').onChange(async (enabled) => {
   if (enabled) await initFaceDetector();
+});
+detectionFolder.add(settings, 'faceLandmarks').name('Face Landmarks').onChange(async (enabled) => {
+  if (enabled) await initFaceLandmarker();
+});
+detectionFolder.add(settings, 'handLandmarks').name('Hand Landmarks').onChange(async (enabled) => {
+  if (enabled) await initHandLandmarker();
 });
 
 setMode(settings.mode);
@@ -63,10 +83,29 @@ setMode(settings.mode);
 renderer.setAnimationLoop((timestamp) => {
   if (settings.mode === 'cube') animateCube(meshGroup);
   
-  if (settings.faceDetection && settings.mode === 'faceTrack') {
+  if (settings.faceDetection) {
     const detections = detectFaces(video, timestamp);
     if (detections !== null) lastDetections = detections;
-    updateFaceMarkers(meshGroup, lastDetections, video.videoWidth, video.videoHeight);
+    updateFaceDetectionOverlay(lastDetections, video.videoWidth, video.videoHeight);
+  } else if (!settings.faceLandmarks && !settings.handLandmarks) {
+    clearAllOverlays();
+  }
+  
+  if (settings.faceLandmarks || settings.handLandmarks) {
+    if (settings.faceLandmarks) {
+      const faceResult = detectFaceLandmarks(video, timestamp);
+      if (faceResult !== null) lastFaceLandmarks = faceResult;
+    }
+    if (settings.handLandmarks) {
+      const handResult = detectHandLandmarks(video, timestamp);
+      if (handResult !== null) lastHandLandmarks = handResult;
+    }
+    updateLandmarksOverlay(
+      settings.faceLandmarks ? lastFaceLandmarks : null,
+      settings.handLandmarks ? lastHandLandmarks : null,
+      video.videoWidth,
+      video.videoHeight
+    );
   }
   
   renderer.render(scene, camera);

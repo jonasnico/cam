@@ -34,14 +34,18 @@ const settings = {
 };
 
 const audioSettings = {
-  synthType: 'sawtooth',
+  synthType: 'sine',
   oscillatorCount: 3,
   masterVolume: 0.5,
+  synthVolume: 0.7,
+  drumVolume: 0.8,
   filterCutoff: 100,
   filterResonance: 2,
   reverbMix: 0.3,
   delayTime: 0.25,
-  delayFeedback: 0.2
+  delayFeedback: 0.2,
+  enableSynth: true,
+  enableDrums: true
 };
 
 let lastFaceLandmarks = null;
@@ -125,13 +129,18 @@ trackingFolder.add(settings, 'handLandmarks').name('Hands').onChange(async (enab
 });
 
 const synthFolder = gui.addFolder('Synth');
+synthFolder.add(audioSettings, 'enableSynth').name('Enable');
 synthFolder.add(audioSettings, 'synthType', SYNTH_TYPES).name('Waveform').onChange(() => {
   if (strudelInitialized) updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
 });
 synthFolder.add(audioSettings, 'oscillatorCount', 1, 4, 1).name('Voices').onChange(() => {
   if (strudelInitialized) updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
 });
-synthFolder.add(audioSettings, 'masterVolume', 0, 1, 0.01).name('Volume');
+synthFolder.add(audioSettings, 'synthVolume', 0, 1, 0.01).name('Volume');
+
+const drumsFolder = gui.addFolder('Drums');
+drumsFolder.add(audioSettings, 'enableDrums').name('Enable');
+drumsFolder.add(audioSettings, 'drumVolume', 0, 1, 0.01).name('Volume');
 
 const filterFolder = gui.addFolder('Filter');
 filterFolder.add(audioSettings, 'filterCutoff', 10, 100, 1).name('Cutoff %');
@@ -143,6 +152,7 @@ effectsFolder.add(audioSettings, 'delayTime', 0.05, 1, 0.01).name('Delay Time');
 effectsFolder.add(audioSettings, 'delayFeedback', 0, 0.9, 0.01).name('Delay Mix');
 
 const controlFolder = gui.addFolder('Control');
+controlFolder.add(audioSettings, 'masterVolume', 0, 1, 0.01).name('Master Volume');
 controlFolder.add(settings, 'musicEnabled').name('Enable Audio').onChange(async (enabled) => {
   if (enabled) {
     if (!strudelInitialized) {
@@ -196,7 +206,7 @@ renderer.setAnimationLoop((timestamp) => {
     
     if (settings.musicEnabled && timestamp - lastCodeUpdate > 30) {
       const gestures = getGestureState();
-      const params = gestureToAudioParams(gestures, vel);
+      const params = gestureToAudioParams(gestures, vel, audioSettings);
       const code = generateStrudelCode(params, audioSettings);
       
       if (settings.showCode) {

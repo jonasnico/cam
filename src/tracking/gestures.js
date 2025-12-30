@@ -5,6 +5,8 @@ const gestureState = {
   leftHandY: 0.5,
   rightHandX: 0.5,
   rightHandY: 0.5,
+  leftHandVisible: false,
+  rightHandVisible: false,
   handsVisible: 0
 };
 
@@ -17,8 +19,8 @@ const velocity = {
 };
 
 const SMOOTHING = 0.4;
-const VELOCITY_DECAY = 0.7;
-const MOVEMENT_THRESHOLD = 0.02;
+const VELOCITY_DECAY = 0.65;
+const MOVEMENT_THRESHOLD = 0.015;
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
@@ -48,13 +50,16 @@ export function updateGesturesFromFace(faceLandmarks) {
   );
   
   if (faceMovement > MOVEMENT_THRESHOLD) {
-    velocity.face = Math.min(1, faceMovement * 30);
+    velocity.face = Math.min(1, faceMovement * 40);
   } else {
     velocity.face *= VELOCITY_DECAY;
   }
 }
 
 export function updateGesturesFromHands(handLandmarks, handedness) {
+  gestureState.leftHandVisible = false;
+  gestureState.rightHandVisible = false;
+  
   if (!handLandmarks?.length) {
     gestureState.handsVisible = Math.max(0, gestureState.handsVisible - 0.15);
     velocity.leftHand *= VELOCITY_DECAY;
@@ -70,6 +75,7 @@ export function updateGesturesFromHands(handLandmarks, handedness) {
     const isLeft = handedness?.[index]?.categoryName === 'Left';
     
     if (isLeft) {
+      gestureState.leftHandVisible = true;
       previousState.leftHandX = gestureState.leftHandX;
       previousState.leftHandY = gestureState.leftHandY;
       gestureState.leftHandX = lerp(gestureState.leftHandX, wrist.x, SMOOTHING);
@@ -81,11 +87,12 @@ export function updateGesturesFromHands(handLandmarks, handedness) {
       );
       
       if (movement > MOVEMENT_THRESHOLD) {
-        velocity.leftHand = Math.min(1, movement * 30);
+        velocity.leftHand = Math.min(1, movement * 40);
       } else {
         velocity.leftHand *= VELOCITY_DECAY;
       }
     } else {
+      gestureState.rightHandVisible = true;
       previousState.rightHandX = gestureState.rightHandX;
       previousState.rightHandY = gestureState.rightHandY;
       gestureState.rightHandX = lerp(gestureState.rightHandX, wrist.x, SMOOTHING);
@@ -97,7 +104,7 @@ export function updateGesturesFromHands(handLandmarks, handedness) {
       );
       
       if (movement > MOVEMENT_THRESHOLD) {
-        velocity.rightHand = Math.min(1, movement * 30);
+        velocity.rightHand = Math.min(1, movement * 40);
       } else {
         velocity.rightHand *= VELOCITY_DECAY;
       }
@@ -115,41 +122,77 @@ export function getVelocity() {
   return { ...velocity };
 }
 
-export function gestureToAudioParams(gestures, vel) {
-  const activity = Math.min(1, vel.total);
+export function gestureToAudioParams(gestures, vel, audioSettings) {
+  const drumTriggers = [];
   
-  if (activity < 0.05) {
-    return { gain: 0, note: 48, lpf: 200, detune: 0, pan: 0, complexity: 0 };
+  if (audioSettings?.enableDrums && gestures.leftHandVisible) {
+    if (vel.leftHand > 0.15) {
+      if (gestures.leftHandY > 0.7) {
+        drumTriggers.push({ type: 'bd', active: true, velocity: vel.leftHand * 1.2 });
+      } else if (gestures.leftHandY > 0.4) {
+        drumTriggers.push({ type: 'sd', active: true, velocity: vel.leftHand });
+      } else {
+        drumTriggers.push({ type: 'hh', active: true, velocity: vel.leftHand * 0.8 });
+      }
+    }
+    
+    if (vel.leftHand > 0.4 && gestures.leftHandX < 0.3) {
+      drumTriggers.push({ type: 'cp', active: true, velocity: vel.leftHand });
+    }
+    if (vel.leftHand > 0.5 && gestures.leftHandX > 0.7) {
+      drumTriggers.push({ type: 'oh', active: true, velocity: vel.leftHand });
+    }
   }
   
+  const synthActive = audioSettings?.enableSynth && (gestures.rightHandVisible || vel.face > 0.1);
+  const synthGain = synthActive ? Math.min(1, vel.rightHand + vel.face * 0.5) * 0.6 : 0;
+  
+  const baseNote = Math.floor(gestures.faceX * 7);
+  const scale = [0, 2, 4, 5, 7, 9, 11];
+  const scaleNote = scale[baseNote % scale.length];
+  const octave = gestures.rightHandVisible ? Math.floor(gestures.rightHandY * 3) : 1;
+  
   return {
-    gain: activity * 0.5,
-    note: Math.floor(gestures.faceX * 12) + 48,
-    lpf: 200 + activity * 4000 + gestures.rightHandY * 2000,
-    detune: (gestures.leftHandX - 0.5) * 200,
-    pan: (gestures.faceX - 0.5) * 1.5,
-    complexity: 1 + Math.floor(activity * 3)
+    gain: synthGain,
+    note: 48 + scaleNote + octave * 12,
+    lpf: 400 + (vel.face + vel.rightHand) * 3000 + gestures.rightHandY * 2000,
+    detune: (gestures.faceX - 0.5) * 100,
+    pan: (gestures.rightHandX - 0.5) * 1.5,
+    complexity: 1 + Math.floor((vel.face + vel.rightHand) * 2),
+    drumTriggers
   };
 }
 
 export function generateStrudelCode(params, audioSettings) {
-  if (params.gain < 0.01) return '// silent - move to make sound';
+  const lines = [];
   
-  const notes = ['c3', 'd3', 'e3', 'f3', 'g3', 'a3', 'b3', 'c4'];
-  const noteIndex = Math.floor((params.note - 48) / 12 * notes.length) % notes.length;
-  const note = notes[Math.abs(noteIndex)];
-  
-  let code = `sound("${audioSettings.synthType}")`;
-  code += `.note("${note}")`;
-  code += `.gain(${params.gain.toFixed(2)})`;
-  code += `.lpf(${Math.floor(params.lpf * audioSettings.filterCutoff / 100)})`;
-  
-  if (audioSettings.delayFeedback > 0.1) {
-    code += `.delay(${audioSettings.delayFeedback.toFixed(1)})`;
-  }
-  if (audioSettings.reverbMix > 0.1) {
-    code += `.room(${audioSettings.reverbMix.toFixed(1)})`;
+  if (audioSettings.enableDrums && params.drumTriggers?.length > 0) {
+    const activeDrums = params.drumTriggers.filter(t => t.active).map(t => t.type);
+    if (activeDrums.length > 0) {
+      lines.push(`s("${activeDrums.join(' ')}").gain(${audioSettings.drumVolume.toFixed(2)})`);
+    }
   }
   
-  return code;
+  if (audioSettings.enableSynth && params.gain > 0.01) {
+    const notes = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
+    const octave = Math.floor(params.note / 12);
+    const noteIndex = params.note % 12;
+    const note = notes[noteIndex] + octave;
+    
+    let synthCode = `sound("${audioSettings.synthType}").note("${note}")`;
+    synthCode += `.gain(${(params.gain * audioSettings.synthVolume).toFixed(2)})`;
+    synthCode += `.lpf(${Math.floor(params.lpf * audioSettings.filterCutoff / 100)})`;
+    
+    if (audioSettings.delayFeedback > 0.1) {
+      synthCode += `.delay(${audioSettings.delayFeedback.toFixed(1)})`;
+    }
+    if (audioSettings.reverbMix > 0.1) {
+      synthCode += `.room(${audioSettings.reverbMix.toFixed(1)})`;
+    }
+    lines.push(synthCode);
+  }
+  
+  if (lines.length === 0) return '// silent - move to make sound';
+  if (lines.length === 1) return lines[0];
+  return `stack(\n  ${lines.join(',\n  ')}\n)`;
 }

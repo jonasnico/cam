@@ -16,9 +16,14 @@ const velocity = {
   total: 0
 };
 
-const SMOOTHING = 0.4;
-const VELOCITY_DECAY = 0.7;
-const MOVEMENT_THRESHOLD = 0.02;
+const SMOOTHING = 0.35;
+const VELOCITY_DECAY = 0.55;
+const MOVEMENT_THRESHOLD = 0.008;
+const SILENCE_THRESHOLD = 0.004;
+
+let faceActive = false;
+let leftHandActive = false;
+let rightHandActive = false;
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
@@ -31,27 +36,35 @@ function distance(x1, y1, x2, y2) {
 export function updateGesturesFromFace(faceLandmarks) {
   if (!faceLandmarks?.length) {
     velocity.face *= VELOCITY_DECAY;
+    faceActive = velocity.face > SILENCE_THRESHOLD;
+    recalcTotal();
     return;
   }
   const landmarks = faceLandmarks[0];
-  
+
   const noseTip = landmarks[1];
   previousState.faceX = gestureState.faceX;
   previousState.faceY = gestureState.faceY;
-  
+
   gestureState.faceX = lerp(gestureState.faceX, noseTip.x, SMOOTHING);
   gestureState.faceY = lerp(gestureState.faceY, noseTip.y, SMOOTHING);
-  
-  const faceMovement = distance(
+
+  const movement = distance(
     previousState.faceX, previousState.faceY,
     gestureState.faceX, gestureState.faceY
   );
-  
-  if (faceMovement > MOVEMENT_THRESHOLD) {
-    velocity.face = Math.min(1, faceMovement * 30);
+
+  const threshold = faceActive ? SILENCE_THRESHOLD : MOVEMENT_THRESHOLD;
+
+  if (movement > threshold) {
+    velocity.face = Math.min(1, movement * 25);
+    faceActive = true;
   } else {
     velocity.face *= VELOCITY_DECAY;
+    faceActive = velocity.face > SILENCE_THRESHOLD;
   }
+
+  recalcTotal();
 }
 
 export function updateGesturesFromHands(handLandmarks, handedness) {
@@ -59,51 +72,65 @@ export function updateGesturesFromHands(handLandmarks, handedness) {
     gestureState.handsVisible = Math.max(0, gestureState.handsVisible - 0.15);
     velocity.leftHand *= VELOCITY_DECAY;
     velocity.rightHand *= VELOCITY_DECAY;
-    velocity.total = velocity.face + velocity.leftHand + velocity.rightHand;
+    leftHandActive = velocity.leftHand > SILENCE_THRESHOLD;
+    rightHandActive = velocity.rightHand > SILENCE_THRESHOLD;
+    recalcTotal();
     return;
   }
-  
+
   gestureState.handsVisible = Math.min(1, gestureState.handsVisible + 0.3);
-  
+
   handLandmarks.forEach((landmarks, index) => {
     const wrist = landmarks[0];
-    const isLeft = handedness?.[index]?.categoryName === 'Left';
-    
+    const isLeft = wrist.x > 0.5;
+
     if (isLeft) {
       previousState.leftHandX = gestureState.leftHandX;
       previousState.leftHandY = gestureState.leftHandY;
       gestureState.leftHandX = lerp(gestureState.leftHandX, wrist.x, SMOOTHING);
       gestureState.leftHandY = lerp(gestureState.leftHandY, 1 - wrist.y, SMOOTHING);
-      
+
       const movement = distance(
         previousState.leftHandX, previousState.leftHandY,
         gestureState.leftHandX, gestureState.leftHandY
       );
-      
-      if (movement > MOVEMENT_THRESHOLD) {
-        velocity.leftHand = Math.min(1, movement * 30);
+
+      const threshold = leftHandActive ? SILENCE_THRESHOLD : MOVEMENT_THRESHOLD;
+
+      if (movement > threshold) {
+        velocity.leftHand = Math.min(1, movement * 25);
+        leftHandActive = true;
       } else {
         velocity.leftHand *= VELOCITY_DECAY;
+        leftHandActive = velocity.leftHand > SILENCE_THRESHOLD;
       }
     } else {
       previousState.rightHandX = gestureState.rightHandX;
       previousState.rightHandY = gestureState.rightHandY;
       gestureState.rightHandX = lerp(gestureState.rightHandX, wrist.x, SMOOTHING);
       gestureState.rightHandY = lerp(gestureState.rightHandY, 1 - wrist.y, SMOOTHING);
-      
+
       const movement = distance(
         previousState.rightHandX, previousState.rightHandY,
         gestureState.rightHandX, gestureState.rightHandY
       );
-      
-      if (movement > MOVEMENT_THRESHOLD) {
-        velocity.rightHand = Math.min(1, movement * 30);
+
+      const threshold = rightHandActive ? SILENCE_THRESHOLD : MOVEMENT_THRESHOLD;
+
+      if (movement > threshold) {
+        velocity.rightHand = Math.min(1, movement * 25);
+        rightHandActive = true;
       } else {
         velocity.rightHand *= VELOCITY_DECAY;
+        rightHandActive = velocity.rightHand > SILENCE_THRESHOLD;
       }
     }
   });
-  
+
+  recalcTotal();
+}
+
+function recalcTotal() {
   velocity.total = velocity.face + velocity.leftHand + velocity.rightHand;
 }
 
@@ -115,41 +142,71 @@ export function getVelocity() {
   return { ...velocity };
 }
 
+export function getActiveInputs() {
+  return { face: faceActive, leftHand: leftHandActive, rightHand: rightHandActive };
+}
+
+const PENTATONIC = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
+
 export function gestureToAudioParams(gestures, vel) {
-  const activity = Math.min(1, vel.total);
-  
-  if (activity < 0.05) {
+  const maxVel = Math.max(vel.face, vel.leftHand, vel.rightHand);
+
+  if (maxVel < 0.03) {
     return { gain: 0, note: 48, lpf: 200, detune: 0, pan: 0, complexity: 0 };
   }
-  
+
+  const activity = Math.min(1, vel.total * 0.8);
+
+  const pitchSource = vel.face > vel.leftHand && vel.face > vel.rightHand
+    ? gestures.faceX
+    : vel.rightHand > vel.leftHand
+      ? gestures.rightHandY
+      : gestures.leftHandY;
+
+  const scaleIndex = Math.floor(pitchSource * PENTATONIC.length);
+  const clampedIndex = Math.max(0, Math.min(PENTATONIC.length - 1, scaleIndex));
+  const note = 48 + PENTATONIC[clampedIndex];
+
+  const filterBoost = gestures.handsVisible > 0.5
+    ? gestures.rightHandY * 2500
+    : activity * 1500;
+
+  const detune = gestures.handsVisible > 0.5
+    ? (gestures.leftHandX - 0.5) * 80
+    : 0;
+
   return {
-    gain: activity * 0.5,
-    note: Math.floor(gestures.faceX * 12) + 48,
-    lpf: 200 + activity * 4000 + gestures.rightHandY * 2000,
-    detune: (gestures.leftHandX - 0.5) * 200,
-    pan: (gestures.faceX - 0.5) * 1.5,
-    complexity: 1 + Math.floor(activity * 3)
+    gain: Math.min(0.5, activity * 0.45),
+    note,
+    lpf: 300 + activity * 2500 + filterBoost,
+    detune,
+    pan: (gestures.faceX - 0.5) * 1.0,
+    complexity: 1 + Math.floor(activity * 2)
   };
 }
 
 export function generateStrudelCode(params, audioSettings) {
   if (params.gain < 0.01) return '// silent - move to make sound';
-  
-  const notes = ['c3', 'd3', 'e3', 'f3', 'g3', 'a3', 'b3', 'c4'];
-  const noteIndex = Math.floor((params.note - 48) / 12 * notes.length) % notes.length;
-  const note = notes[Math.abs(noteIndex)];
-  
+
+  const noteNames = ['c3', 'd3', 'e3', 'g3', 'a3', 'c4', 'd4', 'e4', 'g4', 'a4', 'c5'];
+  const noteIndex = Math.max(0, Math.min(noteNames.length - 1,
+    PENTATONIC.indexOf(params.note - 48) !== -1
+      ? PENTATONIC.indexOf(params.note - 48)
+      : 0
+  ));
+  const note = noteNames[noteIndex];
+
   let code = `sound("${audioSettings.synthType}")`;
   code += `.note("${note}")`;
   code += `.gain(${params.gain.toFixed(2)})`;
   code += `.lpf(${Math.floor(params.lpf * audioSettings.filterCutoff / 100)})`;
-  
+
   if (audioSettings.delayFeedback > 0.1) {
     code += `.delay(${audioSettings.delayFeedback.toFixed(1)})`;
   }
   if (audioSettings.reverbMix > 0.1) {
     code += `.room(${audioSettings.reverbMix.toFixed(1)})`;
   }
-  
+
   return code;
 }

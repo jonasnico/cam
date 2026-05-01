@@ -3,14 +3,203 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Three.js Webcam</title>
+  <title>cam</title>
   <style>
-    body { margin: 0; overflow: hidden; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #000; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
     canvas { display: block; }
+
+    #start-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 200;
+      cursor: pointer;
+      transition: opacity 0.5s, visibility 0.5s;
+    }
+    #start-overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    #start-overlay h1 {
+      color: #fff;
+      font-size: 2.5rem;
+      font-weight: 300;
+      margin-bottom: 1rem;
+      letter-spacing: -0.02em;
+    }
+    #start-overlay p {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 1.1rem;
+    }
+    #start-overlay .pulse-ring {
+      width: 120px;
+      height: 120px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      margin-bottom: 2rem;
+      animation: pulse 2s ease-in-out infinite;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #start-overlay .pulse-ring::after {
+      content: '▶';
+      color: #fff;
+      font-size: 2rem;
+      margin-left: 4px;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 0.7; }
+      50% { transform: scale(1.08); opacity: 1; }
+    }
+
+    #hud {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 20px;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(10px);
+      border-radius: 50px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 100;
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+    #hud.visible { opacity: 1; }
+
+    .hud-indicator {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1.5px solid rgba(255, 255, 255, 0.15);
+      transition: all 0.2s;
+      font-size: 16px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .hud-indicator.active {
+      background: rgba(100, 255, 150, 0.2);
+      border-color: rgba(100, 255, 150, 0.6);
+      box-shadow: 0 0 12px rgba(100, 255, 150, 0.3);
+    }
+    .hud-indicator.disabled {
+      opacity: 0.3;
+      border-color: rgba(255, 255, 255, 0.05);
+      cursor: pointer;
+    }
+    .hud-indicator.disabled.active {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.05);
+      box-shadow: none;
+    }
+
+    .hud-activity-track {
+      width: 80px;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #hud-activity {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #64ff96, #ffee64, #ff6464);
+      border-radius: 3px;
+      transition: width 0.1s;
+    }
+
+    #gear-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #fff;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 150;
+      transition: background 0.2s;
+    }
+    #gear-btn:hover { background: rgba(255, 255, 255, 0.15); }
+
+    #settings-panel {
+      position: fixed;
+      top: 70px;
+      right: 20px;
+      z-index: 140;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-10px);
+      transition: all 0.25s;
+    }
+    #settings-panel.open {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    #code-display {
+      display: none;
+      position: fixed;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.8);
+      color: #64ff96;
+      padding: 10px 16px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(100, 255, 150, 0.15);
+      z-index: 100;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
   <video id="video" style="display:none" autoplay playsinline></video>
+
+  <div id="start-overlay">
+    <div class="pulse-ring"></div>
+    <h1>cam</h1>
+    <p>Tap to start &middot; Move to play</p>
+  </div>
+
+  <div id="hud">
+    <div id="hud-face" class="hud-indicator" title="Face">🙂</div>
+    <div id="hud-lhand" class="hud-indicator" title="Left Hand">🤚</div>
+    <div id="hud-rhand" class="hud-indicator" title="Right Hand">✋</div>
+    <div class="hud-activity-track">
+      <div id="hud-activity"></div>
+    </div>
+  </div>
+
+  <button id="gear-btn" title="Settings">⚙</button>
+  <div id="settings-panel"></div>
+  <pre id="code-display"></pre>
+
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

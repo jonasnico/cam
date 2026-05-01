@@ -5,8 +5,8 @@ import { detectFaceLandmarks, initFaceLandmarker } from './detection/faceLandmar
 import { detectHandLandmarks, initHandLandmarker } from './detection/handLandmarker.js';
 import { createTracking } from './modes/tracking.js';
 import { clearAllOverlays, initOverlay, updateLandmarksOverlay } from './tracking/overlay.js';
-import { generateStrudelCode, gestureToAudioParams, getGestureState, getVelocity, updateGesturesFromFace, updateGesturesFromHands } from './tracking/gestures.js';
-import { initStrudel, playPattern, stopPattern, updateOscillators, SYNTH_TYPES } from './audio/strudel.js';
+import { generateStrudelCode, gestureToAudioParams, getActiveInputs, getGestureState, getVelocity, updateGesturesFromFace, updateGesturesFromHands } from './tracking/gestures.js';
+import { initStrudel, playPattern, updateOscillators, SYNTH_TYPES } from './audio/strudel.js';
 
 const video = document.getElementById('video');
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -26,195 +26,173 @@ document.body.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enablePan = false;
 
-const settings = { 
-  faceLandmarks: true,
-  handLandmarks: true,
-  musicEnabled: false,
-  showCode: true
-};
-
 const audioSettings = {
-  synthType: 'sawtooth',
-  oscillatorCount: 3,
+  synthType: 'triangle',
+  oscillatorCount: 2,
   masterVolume: 0.5,
   filterCutoff: 100,
-  filterResonance: 2,
-  reverbMix: 0.3,
-  delayTime: 0.25,
-  delayFeedback: 0.2
+  filterResonance: 1.5,
+  reverbMix: 0.4,
+  delayTime: 0.3,
+  delayFeedback: 0.25
+};
+
+const settings = {
+  showCode: false,
+  showOverlay: true,
+  faceEnabled: true,
+  handsEnabled: true
 };
 
 let lastFaceLandmarks = null;
 let lastHandLandmarks = null;
 let strudelInitialized = false;
 let lastCodeUpdate = 0;
+let appStarted = false;
 
 createTracking(meshGroup, material, camera, controls);
 initOverlay(scene);
 
-const codeDisplay = document.createElement('pre');
-codeDisplay.id = 'code-display';
-codeDisplay.style.cssText = `
-  position: fixed;
-  bottom: 20px;
-  left: 20px;
-  background: rgba(0,0,0,0.85);
-  color: #0f0;
-  padding: 15px 20px;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  border-radius: 8px;
-  max-width: 350px;
-  z-index: 100;
-  border: 1px solid #0f03;
-  box-shadow: 0 4px 20px rgba(0,255,0,0.1);
-`;
-document.body.appendChild(codeDisplay);
+const startOverlay = document.getElementById('start-overlay');
+const hud = document.getElementById('hud');
+const hudFace = document.getElementById('hud-face');
+const hudLeftHand = document.getElementById('hud-lhand');
+const hudRightHand = document.getElementById('hud-rhand');
+const hudActivity = document.getElementById('hud-activity');
+const codeDisplay = document.getElementById('code-display');
+const settingsPanel = document.getElementById('settings-panel');
+const gearBtn = document.getElementById('gear-btn');
 
-const meterContainer = document.createElement('div');
-meterContainer.style.cssText = `
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background: rgba(0,0,0,0.85);
-  padding: 15px;
-  border-radius: 8px;
-  z-index: 100;
-  font-family: sans-serif;
-  font-size: 12px;
-  color: #fff;
-  border: 1px solid #fff2;
-`;
-meterContainer.innerHTML = `
-  <div style="margin-bottom:8px;font-weight:bold;">Movement</div>
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-    <span style="width:50px;">Face</span>
-    <div style="flex:1;height:8px;background:#333;border-radius:4px;overflow:hidden;">
-      <div id="face-meter" style="height:100%;width:0%;background:#0f0;transition:width 0.1s;"></div>
-    </div>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-    <span style="width:50px;">L Hand</span>
-    <div style="flex:1;height:8px;background:#333;border-radius:4px;overflow:hidden;">
-      <div id="lhand-meter" style="height:100%;width:0%;background:#f60;transition:width 0.1s;"></div>
-    </div>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-    <span style="width:50px;">R Hand</span>
-    <div style="flex:1;height:8px;background:#333;border-radius:4px;overflow:hidden;">
-      <div id="rhand-meter" style="height:100%;width:0%;background:#06f;transition:width 0.1s;"></div>
-    </div>
-  </div>
-  <div style="display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #fff2;">
-    <span style="width:50px;font-weight:bold;">Total</span>
-    <div style="flex:1;height:12px;background:#333;border-radius:4px;overflow:hidden;">
-      <div id="total-meter" style="height:100%;width:0%;background:linear-gradient(90deg,#0f0,#ff0,#f00);transition:width 0.1s;"></div>
-    </div>
-  </div>
-`;
-document.body.appendChild(meterContainer);
+let gui = null;
 
-const gui = new GUI({ title: 'Gesture Music Controller' });
-
-const trackingFolder = gui.addFolder('Tracking');
-trackingFolder.add(settings, 'faceLandmarks').name('Face').onChange(async (enabled) => {
-  if (enabled) await initFaceLandmarker();
+hudFace.addEventListener('click', () => {
+  settings.faceEnabled = !settings.faceEnabled;
+  hudFace.classList.toggle('disabled', !settings.faceEnabled);
 });
-trackingFolder.add(settings, 'handLandmarks').name('Hands').onChange(async (enabled) => {
-  if (enabled) await initHandLandmarker();
+hudLeftHand.addEventListener('click', () => {
+  settings.handsEnabled = !settings.handsEnabled;
+  hudLeftHand.classList.toggle('disabled', !settings.handsEnabled);
+  hudRightHand.classList.toggle('disabled', !settings.handsEnabled);
+});
+hudRightHand.addEventListener('click', () => {
+  settings.handsEnabled = !settings.handsEnabled;
+  hudLeftHand.classList.toggle('disabled', !settings.handsEnabled);
+  hudRightHand.classList.toggle('disabled', !settings.handsEnabled);
 });
 
-const synthFolder = gui.addFolder('Synth');
-synthFolder.add(audioSettings, 'synthType', SYNTH_TYPES).name('Waveform').onChange(() => {
-  if (strudelInitialized) updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
+function createSettingsPanel() {
+  if (gui) return;
+  gui = new GUI({ container: settingsPanel, title: 'Settings' });
+
+  const soundFolder = gui.addFolder('Sound');
+  soundFolder.add(audioSettings, 'synthType', SYNTH_TYPES).name('Waveform').onChange(() => {
+    if (strudelInitialized) updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
+  });
+  soundFolder.add(audioSettings, 'oscillatorCount', 1, 4, 1).name('Voices').onChange(() => {
+    if (strudelInitialized) updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
+  });
+  soundFolder.add(audioSettings, 'masterVolume', 0, 1, 0.01).name('Volume');
+
+  const filterFolder = gui.addFolder('Filter');
+  filterFolder.add(audioSettings, 'filterCutoff', 10, 100, 1).name('Cutoff %');
+  filterFolder.add(audioSettings, 'filterResonance', 0.1, 15, 0.1).name('Resonance');
+  filterFolder.close();
+
+  const fxFolder = gui.addFolder('Effects');
+  fxFolder.add(audioSettings, 'reverbMix', 0, 1, 0.01).name('Reverb');
+  fxFolder.add(audioSettings, 'delayTime', 0.05, 1, 0.01).name('Delay Time');
+  fxFolder.add(audioSettings, 'delayFeedback', 0, 0.9, 0.01).name('Delay Mix');
+  fxFolder.close();
+
+  const viewFolder = gui.addFolder('View');
+  viewFolder.add(settings, 'showCode').name('Show Code');
+  viewFolder.add(settings, 'showOverlay').name('Show Tracking');
+  viewFolder.close();
+}
+
+gearBtn.addEventListener('click', () => {
+  const isOpen = settingsPanel.classList.toggle('open');
+  if (isOpen && !gui) createSettingsPanel();
 });
-synthFolder.add(audioSettings, 'oscillatorCount', 1, 4, 1).name('Voices').onChange(() => {
-  if (strudelInitialized) updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
-});
-synthFolder.add(audioSettings, 'masterVolume', 0, 1, 0.01).name('Volume');
 
-const filterFolder = gui.addFolder('Filter');
-filterFolder.add(audioSettings, 'filterCutoff', 10, 100, 1).name('Cutoff %');
-filterFolder.add(audioSettings, 'filterResonance', 0.1, 15, 0.1).name('Resonance');
+async function startApp() {
+  if (appStarted) return;
+  appStarted = true;
 
-const effectsFolder = gui.addFolder('Effects');
-effectsFolder.add(audioSettings, 'reverbMix', 0, 1, 0.01).name('Reverb');
-effectsFolder.add(audioSettings, 'delayTime', 0.05, 1, 0.01).name('Delay Time');
-effectsFolder.add(audioSettings, 'delayFeedback', 0, 0.9, 0.01).name('Delay Mix');
+  startOverlay.classList.add('hidden');
+  hud.classList.add('visible');
 
-const controlFolder = gui.addFolder('Control');
-controlFolder.add(settings, 'musicEnabled').name('Enable Audio').onChange(async (enabled) => {
-  if (enabled) {
-    if (!strudelInitialized) {
-      await initStrudel();
-      updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
-      strudelInitialized = true;
-    }
-  } else {
-    stopPattern();
-  }
-});
-controlFolder.add(settings, 'showCode').name('Show Code');
+  await initStrudel();
+  updateOscillators(audioSettings.synthType, audioSettings.oscillatorCount);
+  strudelInitialized = true;
 
-async function initTracking() {
   await initFaceLandmarker();
   await initHandLandmarker();
 }
 
-function updateMeters(vel) {
-  document.getElementById('face-meter').style.width = `${Math.min(100, vel.face * 100)}%`;
-  document.getElementById('lhand-meter').style.width = `${Math.min(100, vel.leftHand * 100)}%`;
-  document.getElementById('rhand-meter').style.width = `${Math.min(100, vel.rightHand * 100)}%`;
-  document.getElementById('total-meter').style.width = `${Math.min(100, vel.total * 33)}%`;
+startOverlay.addEventListener('click', startApp);
+startOverlay.addEventListener('touchstart', startApp);
+
+function updateHud(vel, active) {
+  hudFace.classList.toggle('active', active.face);
+  hudLeftHand.classList.toggle('active', active.leftHand);
+  hudRightHand.classList.toggle('active', active.rightHand);
+
+  const totalPct = Math.min(100, vel.total * 50);
+  hudActivity.style.width = `${totalPct}%`;
+  hudActivity.style.opacity = totalPct > 5 ? '1' : '0.3';
 }
 
 renderer.setAnimationLoop((timestamp) => {
-  if (settings.faceLandmarks || settings.handLandmarks) {
-    if (settings.faceLandmarks) {
+  if (appStarted) {
+    if (settings.faceEnabled) {
       const faceResult = detectFaceLandmarks(video, timestamp);
       if (faceResult !== null) {
         lastFaceLandmarks = faceResult;
         updateGesturesFromFace(faceResult.faceLandmarks);
       }
     }
-    if (settings.handLandmarks) {
+
+    if (settings.handsEnabled) {
       const handResult = detectHandLandmarks(video, timestamp);
       if (handResult !== null) {
         lastHandLandmarks = handResult;
         updateGesturesFromHands(handResult.landmarks, handResult.handednesses);
       }
     }
-    updateLandmarksOverlay(
-      settings.faceLandmarks ? lastFaceLandmarks : null,
-      settings.handLandmarks ? lastHandLandmarks : null,
-      video.videoWidth,
-      video.videoHeight
-    );
-    
+
+    if (settings.showOverlay) {
+      updateLandmarksOverlay(
+        settings.faceEnabled ? lastFaceLandmarks : null,
+        settings.handsEnabled ? lastHandLandmarks : null,
+        video.videoWidth,
+        video.videoHeight
+      );
+    } else {
+      clearAllOverlays();
+    }
+
     const vel = getVelocity();
-    updateMeters(vel);
-    
-    if (settings.musicEnabled && timestamp - lastCodeUpdate > 30) {
+    const active = getActiveInputs();
+    updateHud(vel, active);
+
+    if (strudelInitialized && timestamp - lastCodeUpdate > 30) {
       const gestures = getGestureState();
       const params = gestureToAudioParams(gestures, vel);
       const code = generateStrudelCode(params, audioSettings);
-      
+
       if (settings.showCode) {
         codeDisplay.textContent = code;
         codeDisplay.style.display = 'block';
+      } else {
+        codeDisplay.style.display = 'none';
       }
-      
+
       playPattern(params, audioSettings);
       lastCodeUpdate = timestamp;
     }
-  } else {
-    clearAllOverlays();
   }
-  
-  if (!settings.showCode) {
-    codeDisplay.style.display = 'none';
-  }
-  
+
   renderer.render(scene, camera);
 });
 
@@ -227,12 +205,9 @@ window.addEventListener('resize', () => {
 if (navigator.mediaDevices?.getUserMedia) {
   navigator.mediaDevices
     .getUserMedia({ video: { width: 1280, height: 720, facingMode: 'user' } })
-    .then(async stream => {
+    .then(stream => {
       video.srcObject = stream;
       video.play();
-      await initTracking();
     })
     .catch(error => console.error('Unable to access webcam:', error));
-} else {
-  console.error('MediaDevices interface not available.');
 }

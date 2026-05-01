@@ -80,7 +80,7 @@ export function updateOscillators(synthType, count) {
     const osc = audioContext.createOscillator();
     osc.type = synthType;
     osc.frequency.value = 130.81;
-    osc.detune.value = i * 7;
+    osc.detune.value = i * 3;
     osc.connect(filterNode);
     osc.start();
     oscillators.push(osc);
@@ -97,7 +97,7 @@ export async function playPattern(params, audioSettings) {
   const now = audioContext.currentTime;
   
   if (params.gain < 0.01) {
-    gainNode.gain.setTargetAtTime(0, now, 0.05);
+    gainNode.gain.setTargetAtTime(0, now, 0.15);
     return;
   }
   
@@ -107,27 +107,27 @@ export async function playPattern(params, audioSettings) {
   oscillators.forEach((osc, i) => {
     if (i < activeOscCount) {
       const harmonic = i === 0 ? 1 : i === 1 ? 2 : 0.5;
-      osc.frequency.setTargetAtTime(noteFreq * harmonic, now, 0.02);
-      osc.detune.setTargetAtTime(params.detune + i * 5, now, 0.02);
+      osc.frequency.setTargetAtTime(noteFreq * harmonic, now, 0.05);
+      osc.detune.setTargetAtTime(params.detune + i * 3, now, 0.05);
     }
   });
   
   const finalGain = params.gain * audioSettings.masterVolume;
-  gainNode.gain.setTargetAtTime(finalGain, now, 0.02);
+  gainNode.gain.setTargetAtTime(finalGain, now, 0.08);
   
   const filterFreq = params.lpf * (audioSettings.filterCutoff / 100);
-  filterNode.frequency.setTargetAtTime(filterFreq, now, 0.02);
-  filterNode.Q.setTargetAtTime(audioSettings.filterResonance, now, 0.02);
+  filterNode.frequency.setTargetAtTime(filterFreq, now, 0.05);
+  filterNode.Q.setTargetAtTime(audioSettings.filterResonance, now, 0.05);
   
-  panNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, params.pan)), now, 0.02);
+  panNode.pan.setTargetAtTime(Math.max(-1, Math.min(1, params.pan)), now, 0.05);
   
-  delayNode.delayTime.setTargetAtTime(audioSettings.delayTime, now, 0.02);
-  delayGain.gain.setTargetAtTime(audioSettings.delayFeedback, now, 0.02);
+  delayNode.delayTime.setTargetAtTime(audioSettings.delayTime, now, 0.05);
+  delayGain.gain.setTargetAtTime(audioSettings.delayFeedback, now, 0.05);
 }
 
 export function stopPattern() {
   if (gainNode && audioContext) {
-    gainNode.gain.setTargetAtTime(0, audioContext.currentTime, 0.02);
+    gainNode.gain.setTargetAtTime(0, audioContext.currentTime, 0.2);
   }
 }
 

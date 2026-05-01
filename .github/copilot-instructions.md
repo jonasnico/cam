@@ -15,6 +15,7 @@
 - ES modules, modern JavaScript
 - Small focused files
 - pnpm for package management
+- Never commit or push — always let the user do it
 
 ## Structure
 - `index.html` - UI overlay (start screen, HUD, settings panel, styles)

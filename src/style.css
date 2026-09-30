@@ -1,0 +1,113 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #f1f5f5;
+  background: #000;
+  --muted: #b4bfc2;
+  --face: #86dcc7;
+  --hands: #f1c58c;
+  --surface: #171c1e;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; overflow: hidden; }
+#app-controls { min-height: 100dvh; }
+button, input, select { font: inherit; }
+button { min-height: 44px; cursor: pointer; touch-action: manipulation; }
+button:disabled { cursor: wait; opacity: 0.65; }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--face); outline-offset: 4px; }
+[hidden] { display: none !important; }
+canvas { display: block; position: fixed; inset: 0; z-index: -1; }
+h1, h2, p { margin: 0; }
+button { border: 1px solid #596367; border-radius: 12px; color: inherit; background: var(--surface); padding: 10px 16px; }
+.quiet { background: rgb(0 0 0 / 65%); border-color: transparent; font-size: 14px; color: var(--muted); }
+.primary { background: #f1f5f5; color: #171c1e; border-color: transparent; font-weight: 600; min-height: 52px; padding-inline: 24px; }
+.secondary { color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+#start-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px 24px;
+  overflow: auto;
+  background: rgb(0 0 0 / 85%);
+}
+.start-content { max-width: 480px; text-align: center; margin: auto; }
+.start-content h1 { font-size: 60px; font-weight: 300; letter-spacing: -0.06em; margin-bottom: 32px; }
+.start-content h2 { font-size: clamp(28px, 5vw, 38px); line-height: 1.2; font-weight: 500; letter-spacing: -0.025em; text-wrap: balance; }
+.intro { margin: 20px 0 32px; color: var(--muted); font-size: 16px; line-height: 1.6; }
+.privacy { margin-top: 28px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+#start-status { margin-top: 16px; font-size: 14px; line-height: 1.6; color: var(--hands); text-wrap: balance; }
+#start-status:empty { display: none; }
+#cancel-btn { margin-top: 8px; }
+
+.topbar { position: fixed; top: max(16px, env(safe-area-inset-top)); left: max(20px, env(safe-area-inset-left)); right: max(20px, env(safe-area-inset-right)); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.wordmark { font-size: 28px; font-weight: 300; letter-spacing: -0.06em; background: rgb(0 0 0 / 65%); border-radius: 8px; padding: 2px 8px; }
+.top-actions { display: flex; gap: 4px; white-space: nowrap; }
+#notice { position: fixed; top: calc(max(16px, env(safe-area-inset-top)) + 58px); left: 50%; transform: translateX(-50%); width: min(480px, calc(100% - 32px)); padding: 12px 16px; border-radius: 12px; background: rgb(0 0 0 / 85%); text-align: center; }
+#notice-text { font-size: 14px; line-height: 1.5; }
+#notice button { margin-top: 10px; }
+
+#instrument { position: fixed; bottom: max(12px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(480px, calc(100% - 24px)); text-align: center; }
+#instrument::before { content: ''; position: absolute; inset: -48px -24px -24px; z-index: -1; pointer-events: none; background: linear-gradient(transparent, rgb(0 0 0 / 75%) 40%); border-radius: 24px; }
+#musical-feedback { display: flex; justify-content: center; align-items: baseline; gap: 12px; min-height: 48px; }
+#note-name { font-size: 36px; font-weight: 400; font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
+#note-source { font-size: 14px; color: var(--muted); }
+#musical-feedback[data-source="face"] #note-name { color: var(--face); }
+#musical-feedback[data-source="leftHand"] #note-name,
+#musical-feedback[data-source="rightHand"] #note-name { color: var(--hands); }
+#play-hint { min-height: 36px; margin: 4px 8px 12px; font-size: 14px; color: var(--muted); line-height: 1.4; text-wrap: balance; }
+#hud { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #454d50; background: rgb(0 0 0 / 85%); padding: 8px; border-radius: 20px; }
+.input-toggle { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 92px; border: 1px solid transparent; background: transparent; padding: 8px 10px; }
+.input-label { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 500; }
+.input-state { font-size: 12px; color: var(--muted); }
+.input-dot { width: 6px; height: 6px; border-radius: 50%; background: #778388; }
+.input-toggle[data-state="Tracked"] .input-dot { background: var(--input-color); }
+.input-toggle[data-state="Playing"] { border-color: var(--input-color); background: #20282a; }
+.input-toggle[data-state="Playing"] .input-dot { background: var(--input-color); box-shadow: 0 0 8px var(--input-color); }
+.input-toggle[aria-pressed="false"] .input-dot { background: transparent; border: 1px solid #778388; }
+#hud-face { --input-color: var(--face); }
+#hud-hands { --input-color: var(--hands); }
+.activity-track { width: 64px; height: 5px; background: #354044; border-radius: 4px; overflow: hidden; }
+#hud-activity { height: 100%; background: #f1f5f5; transform: scaleX(0); transform-origin: left; }
+#mute-btn { min-width: 76px; font-size: 14px; }
+#mute-btn[aria-pressed="true"] { background: #f1f5f5; color: #171c1e; }
+#help-btn { margin-top: 6px; }
+#code-display { position: fixed; top: 144px; left: 16px; right: 16px; width: fit-content; max-width: calc(100% - 32px); margin: 0 auto; padding: 12px; background: rgb(0 0 0 / 85%); border-radius: 8px; color: var(--face); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+
+dialog { width: min(380px, calc(100% - 32px)); max-height: calc(100dvh - 48px); background: var(--surface); color: inherit; border: 1px solid #596367; border-radius: 20px; padding: 20px; overflow: auto; }
+dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.dialog-heading { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; background: var(--surface); }
+.dialog-heading h2 { font-size: 20px; font-weight: 500; }
+.close-dialog { font-size: 14px; }
+dialog p { font-size: 15px; line-height: 1.6; }
+.play-guide { margin: 24px 0; }
+.play-guide dt { font-size: 15px; font-weight: 600; margin-top: 20px; }
+.play-guide dd { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+#settings-controls { margin-bottom: 20px; }
+#settings-controls .lil-gui { width: 100%; --background-color: #171c1e; --widget-color: #354044; --text-color: #f1f5f5; --number-color: #86dcc7; --string-color: #86dcc7; --font-size: 14px; --input-font-size: 16px; --widget-height: 44px; --padding: 8px; --spacing: 8px; }
+#settings-controls .lil-gui .lil-controller { min-height: 44px; }
+#settings-controls .lil-gui button { min-height: 44px; }
+#settings-controls .lil-gui .lil-controller .lil-name { line-height: 1.3; align-self: center; }
+
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):hover { border-color: #f1f5f5; }
+}
+@media (max-width: 380px) {
+  .input-toggle { min-width: 80px; padding-inline: 6px; }
+  .activity-track { width: 32px; }
+  #musical-feedback { gap: 8px; }
+  #note-source { font-size: 12px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  #instrument { width: min(540px, calc(100% - 32px)); bottom: 8px; }
+  #musical-feedback { min-height: 32px; }
+  #note-name { font-size: 26px; }
+  #play-hint { margin: 0 0 6px; min-height: 20px; }
+  #help-btn { margin-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto; }
+  #settings-controls .lil-children { transition: none !important; }
+}

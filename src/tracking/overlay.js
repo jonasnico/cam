@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 let overlayGroup = null;
-let faceMarkers = [];
-let landmarkMarkers = [];
+let face = null;
+let hands = [];
 
 const FACE_CONNECTIONS = [
   [10, 338], [338, 297], [297, 332], [332, 284], [284, 251], [251, 389], [389, 356], [356, 454], [454, 323], [323, 361],
@@ -28,122 +28,72 @@ const HAND_CONNECTIONS = [
   [5, 9], [9, 13], [13, 17]
 ];
 
-const PLANE_WIDTH = 16;
-const PLANE_HEIGHT = 9;
-
 export function initOverlay(scene) {
   if (overlayGroup) return overlayGroup;
   overlayGroup = new THREE.Group();
   overlayGroup.name = 'trackingOverlay';
+  face = createMarkers(FACE_CONNECTIONS, 1);
+  hands = [createMarkers(HAND_CONNECTIONS, 21), createMarkers(HAND_CONNECTIONS, 21)];
+  overlayGroup.add(face.group, ...hands.map(hand => hand.group));
   scene.add(overlayGroup);
   return overlayGroup;
 }
 
-function clearMarkers(markers) {
-  markers.forEach(marker => {
-    marker.geometry?.dispose();
-    marker.material?.dispose();
-    overlayGroup?.remove(marker);
+function createMarkers(connections, pointCount) {
+  const group = new THREE.Group();
+  const lineGeometry = new THREE.BufferGeometry();
+  const pointGeometry = new THREE.BufferGeometry();
+  lineGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(connections.length * 6), 3).setUsage(THREE.DynamicDrawUsage));
+  pointGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pointCount * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  const lines = new THREE.LineSegments(lineGeometry, new THREE.LineBasicMaterial({
+    transparent: true, opacity: 0.5, depthTest: false
+  }));
+  const points = new THREE.Points(pointGeometry, new THREE.PointsMaterial({
+    size: 4, sizeAttenuation: false, depthTest: false
+  }));
+  lines.frustumCulled = false;
+  points.frustumCulled = false;
+  lines.renderOrder = 1;
+  points.renderOrder = 2;
+  group.add(lines, points);
+  group.visible = false;
+  return { group, lines, points, connections, pointCount };
+}
+
+function updateMarkers(markers, landmarks, color, active) {
+  markers.group.visible = Boolean(landmarks);
+  if (!landmarks) return;
+  const linePositions = markers.lines.geometry.attributes.position;
+  markers.connections.forEach(([first, second], index) => {
+    for (const [offset, point] of [landmarks[first], landmarks[second]].entries()) {
+      linePositions.setXYZ(index * 2 + offset, 0.5 - point.x, 0.5 - point.y, 0.01);
+    }
   });
-  return [];
-}
-
-function toPlaneCoords(x, y) {
-  return {
-    x: (x - 0.5) * PLANE_WIDTH,
-    y: (0.5 - y) * PLANE_HEIGHT
-  };
-}
-
-export function updateFaceDetectionOverlay(detections, videoWidth, videoHeight) {
-  faceMarkers = clearMarkers(faceMarkers);
-  if (!detections?.length || !videoWidth || !overlayGroup) return;
-
-  detections.forEach(detection => {
-    const box = detection.boundingBox;
-    const normalizedX = (box.originX + box.width / 2) / videoWidth;
-    const normalizedY = (box.originY + box.height / 2) / videoHeight;
-    const normalizedW = box.width / videoWidth;
-    const normalizedH = box.height / videoHeight;
-
-    const pos = toPlaneCoords(normalizedX, normalizedY);
-    const w = normalizedW * PLANE_WIDTH;
-    const h = normalizedH * PLANE_HEIGHT;
-
-    const boxGeometry = new THREE.EdgesGeometry(new THREE.PlaneGeometry(w, h));
-    const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
-    const wireframe = new THREE.LineSegments(boxGeometry, lineMaterial);
-    wireframe.position.set(pos.x, pos.y, 0.1);
-    overlayGroup.add(wireframe);
-    faceMarkers.push(wireframe);
-
-    detection.keypoints?.forEach(keypoint => {
-      const kp = toPlaneCoords(keypoint.x / videoWidth, keypoint.y / videoHeight);
-      const dotGeometry = new THREE.CircleGeometry(0.08, 8);
-      const dotMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-      const dot = new THREE.Mesh(dotGeometry, dotMaterial);
-      dot.position.set(kp.x, kp.y, 0.2);
-      overlayGroup.add(dot);
-      faceMarkers.push(dot);
-    });
+  const pointPositions = markers.points.geometry.attributes.position;
+  const dots = markers.pointCount === 1 ? [landmarks[1]] : landmarks;
+  dots.forEach((point, index) => {
+    pointPositions.setXYZ(index, 0.5 - point.x, 0.5 - point.y, 0.02);
   });
+  linePositions.needsUpdate = true;
+  pointPositions.needsUpdate = true;
+  markers.lines.material.color.setHex(color);
+  markers.points.material.color.setHex(color);
+  markers.lines.material.opacity = active ? 0.95 : 0.4;
+  markers.points.material.size = active ? 7 : 3;
 }
 
-export function updateLandmarksOverlay(faceResults, handResults, videoWidth, videoHeight) {
-  landmarkMarkers = clearMarkers(landmarkMarkers);
-  if (!videoWidth || !overlayGroup) return;
-
-  if (faceResults?.faceLandmarks) {
-    faceResults.faceLandmarks.forEach(landmarks => {
-      const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
-      FACE_CONNECTIONS.forEach(([i, j]) => {
-        if (landmarks[i] && landmarks[j]) {
-          const p1 = toPlaneCoords(landmarks[i].x, landmarks[i].y);
-          const p2 = toPlaneCoords(landmarks[j].x, landmarks[j].y);
-          const geometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(p1.x, p1.y, 0.1),
-            new THREE.Vector3(p2.x, p2.y, 0.1)
-          ]);
-          const line = new THREE.Line(geometry, lineMaterial);
-          overlayGroup.add(line);
-          landmarkMarkers.push(line);
-        }
-      });
-    });
-  }
-
-  if (handResults?.landmarks) {
-    handResults.landmarks.forEach((landmarks, handIndex) => {
-      const color = handIndex === 0 ? 0xff6600 : 0x0066ff;
-      
-      landmarks.forEach(point => {
-        const pos = toPlaneCoords(point.x, point.y);
-        const dot = new THREE.Mesh(
-          new THREE.CircleGeometry(0.06, 8),
-          new THREE.MeshBasicMaterial({ color })
-        );
-        dot.position.set(pos.x, pos.y, 0.2);
-        overlayGroup.add(dot);
-        landmarkMarkers.push(dot);
-      });
-
-      const lineMaterial = new THREE.LineBasicMaterial({ color });
-      HAND_CONNECTIONS.forEach(([i, j]) => {
-        const p1 = toPlaneCoords(landmarks[i].x, landmarks[i].y);
-        const p2 = toPlaneCoords(landmarks[j].x, landmarks[j].y);
-        const geometry = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(p1.x, p1.y, 0.15),
-          new THREE.Vector3(p2.x, p2.y, 0.15)
-        ]);
-        const line = new THREE.Line(geometry, lineMaterial);
-        overlayGroup.add(line);
-        landmarkMarkers.push(line);
-      });
-    });
-  }
+export function updateLandmarksOverlay(faceResults, handResults, videoWidth, videoHeight, source) {
+  if (!overlayGroup || !videoWidth || !videoHeight) return;
+  overlayGroup.visible = true;
+  overlayGroup.scale.x = videoWidth / videoHeight;
+  updateMarkers(face, faceResults?.faceLandmarks?.[0], 0x86dcc7, source === 'face');
+  hands.forEach((markers, index) => {
+    const landmarks = handResults?.landmarks?.[index];
+    const name = landmarks?.[0].x > 0.5 ? 'leftHand' : 'rightHand';
+    updateMarkers(markers, landmarks, 0xf1c58c, source === name);
+  });
 }
 
 export function clearAllOverlays() {
-  faceMarkers = clearMarkers(faceMarkers);
-  landmarkMarkers = clearMarkers(landmarkMarkers);
+  if (overlayGroup) overlayGroup.visible = false;
 }
